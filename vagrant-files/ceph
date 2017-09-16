@@ -1,0 +1,89 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# -------------- Config -------------- #
+# Global
+path_to_disks = 'disks'
+
+# Admin
+admin_ram = 512
+
+# nodes
+number_of_nodes = 1
+node_ram = 512
+number_of_node_disks = 3
+disk_size = 1 * 1024
+
+
+# -------------- inline scripts -------------- #
+
+$hosts_script = <<SCRIPT
+cat > /etc/hosts <<EOF
+127.0.0.1       localhost
+10.10.10.100   
+10.10.10.101   ceph-server-1
+10.10.10.102   ceph-server-2
+10.10.10.103   ceph-server-3
+EOF
+SCRIPT
+
+$ssh_keys_script = <<SCRIPT
+for i in #{number_of_nodes}; do
+  ssh-copy-id -i '/home/ceph/.ssh/id_rsa.pub' ceph@ceph-server-$i
+done
+SCRIPT
+
+# -------------- Vagrant -------------- #
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "bento/centos-7.2"
+  config.ssh.forward_agent = true
+  config.ssh.insert_key = false
+  config.hostmanager.enabled = false
+  config.cache.scope = :box
+
+  # We provision three nodes to be Ceph servers
+  (1..number_of_nodes).each do |i|
+    uniqe_disk_id = rand(1000...9999)
+    config.vm.define "ceph-server-#{i}" do |node|
+      node.vm.provider :virtualbox do |v|
+        v.name = "ceph-server-#{i}"
+        v.customize ["modifyvm", :id, "--memory", "#{node_ram}" ]
+
+        (1..number_of_node_disks).each do |j|
+          v.customize ['createhd',
+           '--filename',"#{path_to_disks}/ceph-server-#{uniqe_disk_id}-#{'s'+i+'d'+j}.vdi",
+            '--size', "#{disk_size}",
+            '--format','VDI']
+
+          v.customize ['storageattach', :id,
+           '--storagectl', 'SATA Controller',
+            '--port', 1,
+             '--device', 0,
+              '--type', 'hdd',
+               '--medium', "#{path_to_disks}/ceph-server-#{uniqe_disk_id}-#{'s'+i+'d'+j}.vdi"]
+          end
+      end
+      node.vm.hostname = "ceph-server-#{i}"
+      node.vm.network :private_network, ip: "10.10.10.#{i+100}"
+      node.vm.provision :shell, :inline => $hosts_script
+      node.vm.provision :shell, :path => "provision/provision_ceph.sh"
+      node.vm.provision :shell, :path => "provision/system/format_disks.sh"
+
+    end
+  end
+
+  # We need one Ceph admin machine to manage the cluster
+
+  config.vm.define "ceph-admin" do |admin|
+    admin.vm.provider :virtualbox do |v|
+        v.name = "ceph-admin"
+        v.customize ["modifyvm", :id, "--memory", "#{admin_ram}" ]
+    end
+    admin.vm.hostname = "ceph-admin"
+    admin.vm.network :private_network, ip: "10.10.10.100"
+    admin.vm.provision :shell, :inline => $hosts_script
+    admin.vm.provision :shell, :path => "provision/provision_ceph.sh"
+    admin.vm.provision :shell, :inline => $ssh_keys_script
+  end
+end

@@ -1,0 +1,53 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+
+masterRam = 1024
+worker1Ram = 512
+
+$hosts_script = <<SCRIPT
+cat > /etc/hosts <<EOF
+127.0.0.1       localhost
+10.10.10.100   master
+10.10.10.101   worker1
+
+EOF
+SCRIPT
+
+Vagrant.configure("2") do |config|
+
+  # Define base image
+  config.vm.box = "bento/centos-7.2"
+ 
+  config.vm.define :master do |master|
+    master.vm.provider :virtualbox do |v|
+      v.name = "vm-demo-master"
+      v.customize ["modifyvm", :id, "--memory", "#{masterRam}" ]
+    end
+    master.vm.network :private_network, ip: "10.10.10.100"
+    #master.vm.network "forwarded_port", guest: 22, host: 2201, guest_ip: "10.10.10.100",host_ip: "127.0.0.1", id: 'ssh'
+    master.vm.network "forwarded_port", guest: 8080, host: 8088, guest_ip: "10.10.10.100",host_ip: "127.0.0.1", id: 'web'
+    #master.vm.network "forwarded_port", guest: 8888, host: 8888, guest_ip: "10.10.10.100", host_ip: "127.0.0.1", id: 'jupyter'
+    master.vm.hostname = "vm-master"
+    master.vm.provision :shell, :inline => $hosts_script
+    master.vm.provision :shell, :path => "provision/provision_basic.sh"
+    #master.vm.provision :shell, :path => "provision/provision_for_master.sh"
+  end
+
+  config.vm.define :worker1 do |worker1|
+    worker1.vm.provider :virtualbox do |v|
+      v.name = "vm-demo-worker1"
+      v.customize ["modifyvm", :id, "--memory", "#{worker1Ram}" ]
+    end
+    worker1.vm.network :private_network, ip: "10.10.10.101"
+    worker1.vm.network "forwarded_port", guest: 2181, host: 2181, guest_ip: "10.10.10.101",host_ip: "127.0.0.1", id: 'zookeeper'
+    worker1.vm.network "forwarded_port", guest: 9092, host: 9092,  guest_ip: "10.10.10.101" , host_ip: "127.0.0.1", id: 'kafka'
+    worker1.vm.hostname = "vm-demo-worker1"
+    worker1.vm.provision :shell, :inline => $hosts_script
+    worker1.vm.provision :shell, :path => "provision/provision_basic.sh"
+    worker1.vm.provision :shell, :path => "provision/provision_for_kafka.sh"
+
+
+  end
+
+end
